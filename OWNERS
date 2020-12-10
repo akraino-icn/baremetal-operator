@@ -7,3 +7,7 @@ approvers:
  - russellb
  - stbenjam
  - zaneb
+
+reviewers:
+ - honza
+ - dukov

@@ -2,9 +2,11 @@ package baremetalhost
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -198,6 +200,29 @@ func (r *ReconcileBareMetalHost) Reconcile(request reconcile.Request) (result re
 		}
 	}
 
+	// Check if Status is empty and status annotation is present
+	// Manually restore data.
+	if !r.hostHasStatus(host) {
+		reqLogger.Info("Fetching Status from Annotation")
+		objStatus, err := r.getHostStatusFromAnnotation(host)
+		if err == nil && objStatus != nil {
+			host.Status = *objStatus
+			if host.Status.LastUpdated.IsZero() {
+				// Ensure the LastUpdated timestamp in set to avoid
+				// infinite loops if the annotation only contained
+				// part of the status information.
+				t := metav1.Now()
+				host.Status.LastUpdated = &t
+			}
+			errStatus := r.client.Status().Update(context.TODO(), host)
+			if errStatus != nil {
+				return reconcile.Result{}, errors.Wrap(err, "Could not restore status from annotation")
+			}
+			return reconcile.Result{Requeue: true}, nil
+		}
+		reqLogger.Info("No status cache found")
+	}
+
 	// NOTE(dhellmann): Handle a few steps outside of the phase
 	// structure because they require extra data lookup (like the
 	// credential checks) or have to be done "first" (like delete
@@ -259,10 +284,12 @@ func (r *ReconcileBareMetalHost) Reconcile(request reconcile.Request) (result re
 	// over when there is an unrecoverable error (tracked through the
 	// error state of the host).
 	if actResult.Dirty() {
+
+		// Save Host
 		info.log.Info("saving host status",
 			"operational status", host.OperationalStatus(),
 			"provisioning state", host.Status.Provisioning.State)
-		if err = r.saveStatus(host); err != nil {
+		if err = r.saveHostStatus(host); err != nil {
 			return reconcile.Result{}, errors.Wrap(err,
 				fmt.Sprintf("failed to save host status after %q", initialState))
 		}
@@ -327,7 +354,7 @@ func (r *ReconcileBareMetalHost) credentialsErrorResult(err error, request recon
 			// overwrites our discovered state
 			host.Status.ErrorMessage = err.Error()
 			host.Status.ErrorType = ""
-			saveErr := r.saveStatus(host)
+			saveErr := r.saveHostStatus(host)
 			if saveErr != nil {
 				return reconcile.Result{Requeue: true}, saveErr
 			}
@@ -384,14 +411,14 @@ func hasRebootAnnotation(host *metal3v1alpha1.BareMetalHost) bool {
 }
 
 // isRebootAnnotation returns true if the provided annotation is a reboot annotation (either suffixed or not)
-func isRebootAnnotation(annotation string) bool{
+func isRebootAnnotation(annotation string) bool {
 	return strings.HasPrefix(annotation, rebootAnnotationPrefix+"/") || annotation == rebootAnnotationPrefix
 }
 
 // clearRebootAnnotations deletes all reboot annotations exist on the provided host
 func clearRebootAnnotations(host *metal3v1alpha1.BareMetalHost) (dirty bool) {
 	for annotation := range host.Annotations {
-		if isRebootAnnotation(annotation){
+		if isRebootAnnotation(annotation) {
 			delete(host.Annotations, annotation)
 			dirty = true
 		}
@@ -418,10 +445,6 @@ func (r *ReconcileBareMetalHost) actionDeleting(prov provisioner.Provisioner, in
 		return actionError{errors.Wrap(err, "failed to delete")}
 	}
 	if provResult.Dirty {
-		err = r.saveStatus(info.host)
-		if err != nil {
-			return actionError{errors.Wrap(err, "failed to save host after deleting")}
-		}
 		return actionContinue{provResult.RequeueAfter}
 	}
 
@@ -550,6 +573,7 @@ func (r *ReconcileBareMetalHost) actionMatchProfile(prov provisioner.Provisioner
 		info.log.Info("updating hardware profile", "profile", hardwareProfile)
 		info.publishEvent("ProfileSet", fmt.Sprintf("Hardware profile set: %s", hardwareProfile))
 	}
+
 	info.host.ClearError()
 	return actionComplete{}
 }
@@ -599,6 +623,13 @@ func (r *ReconcileBareMetalHost) actionProvisioning(prov provisioner.Provisioner
 	return actionComplete{}
 }
 
+// clearHostProvisioningSettings removes the values related to
+// provisioning that do not trigger re-provisioning from the status
+// fields of a host.
+func clearHostProvisioningSettings(host *metal3v1alpha1.BareMetalHost) {
+	host.Status.Provisioning.RootDeviceHints = nil
+}
+
 func (r *ReconcileBareMetalHost) actionDeprovisioning(prov provisioner.Provisioner, info *reconcileInfo) actionResult {
 	info.log.Info("deprovisioning")
 
@@ -623,9 +654,10 @@ func (r *ReconcileBareMetalHost) actionDeprovisioning(prov provisioner.Provision
 		return actionContinueNoWrite{}
 	}
 
-	// After the provisioner is done, clear the image settings so we
-	// transition to the next state.
+	// After the provisioner is done, clear the provisioning settings
+	// so we transition to the next state.
 	info.host.Status.Provisioning.Image = metal3v1alpha1.Image{}
+	clearHostProvisioningSettings(info.host)
 
 	return actionComplete{}
 }
@@ -762,16 +794,124 @@ func (r *ReconcileBareMetalHost) actionManageReady(prov provisioner.Provisioner,
 	}
 
 	if info.host.NeedsProvisioning() {
+		// Ensure the root device hints we're going to use are stored.
+		dirty, err := saveHostProvisioningSettings(info.host)
+		if err != nil {
+			return actionError{errors.Wrap(err, "Could not save the host provisioning settings")}
+		}
+		if dirty {
+			info.log.Info("updating host provisioning settings")
+		}
 		info.host.ClearError()
 		return actionComplete{}
 	}
 	return r.manageHostPower(prov, info)
 }
 
-func (r *ReconcileBareMetalHost) saveStatus(host *metal3v1alpha1.BareMetalHost) error {
+// saveHostProvisioningSettings copies the values related to
+// provisioning that do not trigger re-provisioning into the status
+// fields of the host.
+func saveHostProvisioningSettings(host *metal3v1alpha1.BareMetalHost) (dirty bool, err error) {
+
+	// Ensure the root device hints we're going to use are stored.
+	//
+	// If the user has provided explicit root device hints, they take
+	// precedence. Otherwise use the values from the hardware profile.
+	hintSource := host.Spec.RootDeviceHints
+	if hintSource == nil {
+		hwProf, err := hardware.GetProfile(host.HardwareProfile())
+		if err != nil {
+			return false, errors.Wrap(err, "Could not update root device hints")
+		}
+		hintSource = &hwProf.RootDeviceHints
+	}
+	if (hintSource != nil && host.Status.Provisioning.RootDeviceHints == nil) || *hintSource != *(host.Status.Provisioning.RootDeviceHints) {
+		host.Status.Provisioning.RootDeviceHints = hintSource
+		dirty = true
+	}
+	return
+}
+
+func (r *ReconcileBareMetalHost) saveHostStatus(host *metal3v1alpha1.BareMetalHost) error {
 	t := metav1.Now()
 	host.Status.LastUpdated = &t
-	return r.client.Status().Update(context.TODO(), host)
+
+	if err := r.saveHostAnnotation(host); err != nil {
+		return err
+	}
+
+	//Refetch host again
+	obj := host.Status.DeepCopy()
+	err := r.client.Get(context.TODO(),
+		client.ObjectKey{
+			Name:      host.Name,
+			Namespace: host.Namespace,
+		},
+		host,
+	)
+	if err != nil {
+		return errors.Wrap(err, "Failed to update Status annotation")
+	}
+	host.Status = *obj
+	err = r.client.Status().Update(context.TODO(), host)
+	return err
+}
+
+func (r *ReconcileBareMetalHost) saveHostAnnotation(host *metal3v1alpha1.BareMetalHost) error {
+	//Repopulate annotation again
+	objStatus, err := r.getHostStatusFromAnnotation(host)
+	if err != nil {
+		return err
+	}
+
+	if objStatus != nil {
+		// This value is copied to avoid continually updating the annotation
+		objStatus.LastUpdated = host.Status.LastUpdated
+		if reflect.DeepEqual(host.Status, *objStatus) {
+			return nil
+		}
+	}
+
+	delete(host.Annotations, metal3v1alpha1.StatusAnnotation)
+	newAnnotation, err := marshalStatusAnnotation(&host.Status)
+	if err != nil {
+		return err
+	}
+	if host.Annotations == nil {
+		host.Annotations = make(map[string]string)
+	}
+	host.Annotations[metal3v1alpha1.StatusAnnotation] = string(newAnnotation)
+	return r.client.Update(context.TODO(), host.DeepCopy())
+}
+
+func marshalStatusAnnotation(status *metal3v1alpha1.BareMetalHostStatus) ([]byte, error) {
+	newAnnotation, err := json.Marshal(status)
+	if err != nil {
+		return []byte{}, errors.Wrap(err, "failed to marshall status annotation")
+	}
+	return newAnnotation, nil
+}
+
+func unmarshalStatusAnnotation(content []byte) (*metal3v1alpha1.BareMetalHostStatus, error) {
+	objStatus := &metal3v1alpha1.BareMetalHostStatus{}
+	if err := json.Unmarshal(content, objStatus); err != nil {
+		return nil, errors.Wrap(err, "Failed to fetch Status from annotation")
+	}
+	return objStatus, nil
+}
+
+// extract host from Status annotation
+func (r *ReconcileBareMetalHost) getHostStatusFromAnnotation(host *metal3v1alpha1.BareMetalHost) (*metal3v1alpha1.BareMetalHostStatus, error) {
+	annotations := host.GetAnnotations()
+	content := []byte(annotations[metal3v1alpha1.StatusAnnotation])
+	if annotations[metal3v1alpha1.StatusAnnotation] == "" {
+		return nil, nil
+	}
+	objStatus, err := unmarshalStatusAnnotation(content)
+	if err != nil {
+		return nil, err
+	}
+	return objStatus, nil
 }
 
 func (r *ReconcileBareMetalHost) setErrorCondition(request reconcile.Request, host *metal3v1alpha1.BareMetalHost, errType metal3v1alpha1.ErrorType, message string) (changed bool, err error) {
@@ -784,7 +924,7 @@ func (r *ReconcileBareMetalHost) setErrorCondition(request reconcile.Request, ho
 			"adding error message",
 			"message", message,
 		)
-		err = r.saveStatus(host)
+		err = r.saveHostStatus(host)
 		if err != nil {
 			err = errors.Wrap(err, "failed to update error message")
 		}
@@ -889,6 +1029,10 @@ func (r *ReconcileBareMetalHost) publishEvent(request reconcile.Request, event c
 			"reason", event.Reason, "message", event.Message, "error", err)
 	}
 	return
+}
+
+func (r *ReconcileBareMetalHost) hostHasStatus(host *metal3v1alpha1.BareMetalHost) bool {
+	return !host.Status.LastUpdated.IsZero()
 }
 
 func hostHasFinalizer(host *metal3v1alpha1.BareMetalHost) bool {

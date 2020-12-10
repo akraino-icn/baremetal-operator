@@ -59,9 +59,13 @@ func (hcd *hostConfigData) UserData() (string, error) {
 		hcd.log.Info("UserData is not set return empty string")
 		return "", nil
 	}
+	namespace := hcd.host.Spec.UserData.Namespace
+	if namespace == "" {
+		namespace = hcd.host.Namespace
+	}
 	return hcd.getSecretData(
 		hcd.host.Spec.UserData.Name,
-		hcd.host.Spec.UserData.Namespace,
+		namespace,
 		"userData",
 	)
 
@@ -73,9 +77,30 @@ func (hcd *hostConfigData) NetworkData() (string, error) {
 		hcd.log.Info("NetworkData is not set returning epmty(nil) data")
 		return "", nil
 	}
+	namespace := hcd.host.Spec.NetworkData.Namespace
+	if namespace == "" {
+		namespace = hcd.host.Namespace
+	}
 	return hcd.getSecretData(
 		hcd.host.Spec.NetworkData.Name,
-		hcd.host.Spec.NetworkData.Namespace,
+		namespace,
 		"networkData",
+	)
+}
+
+// MetaData get host metatdata
+func (hcd *hostConfigData) MetaData() (string, error) {
+	if hcd.host.Spec.MetaData == nil {
+		hcd.log.Info("MetaData is not set returning empty(nil) data")
+		return "", nil
+	}
+	namespace := hcd.host.Spec.MetaData.Namespace
+	if namespace == "" {
+		namespace = hcd.host.Namespace
+	}
+	return hcd.getSecretData(
+		hcd.host.Spec.MetaData.Name,
+		namespace,
+		"metaData",
 	)
 }

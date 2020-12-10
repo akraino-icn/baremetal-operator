@@ -31,7 +31,7 @@ func TestParse(t *testing.T) {
 			Hostname: "192.168.122.1:6233",
 			Path:     "/",
 			Query: map[string][]string{
-				"abc": []string{"def"},
+				"abc": {"def"},
 			},
 		},
 
@@ -230,6 +230,87 @@ func TestParse(t *testing.T) {
 			Hostname: "192.168.122.1",
 			Path:     "",
 		},
+
+		// ibmc
+		{
+			Scenario: "ibmc url",
+			Address:  "ibmc://192.168.122.1",
+			Type:     "ibmc",
+			Port:     "",
+			Host:     "192.168.122.1",
+			Hostname: "192.168.122.1",
+			Path:     "",
+		},
+
+		{
+			Scenario: "ibmc url path",
+			Address:  "ibmc://192.168.122.1:6233/foo",
+			Type:     "ibmc",
+			Port:     "6233",
+			Host:     "192.168.122.1",
+			Hostname: "192.168.122.1:6233",
+			Path:     "/foo",
+		},
+
+		{
+			Scenario: "ibmc url with http scheme",
+			Address:  "ibmc+http://192.168.122.1",
+			Type:     "ibmc+http",
+			Port:     "",
+			Host:     "192.168.122.1",
+			Hostname: "192.168.122.1",
+			Path:     "",
+		},
+
+		{
+			Scenario: "ibmc url with http scheme",
+			Address:  "ibmc+https://192.168.122.1",
+			Type:     "ibmc+https",
+			Port:     "",
+			Host:     "192.168.122.1",
+			Hostname: "192.168.122.1",
+			Path:     "",
+		},
+
+		{
+			Scenario: "ibmc url path",
+			Address:  "ibmc://192.168.122.1:6233/foo",
+			Type:     "ibmc",
+			Port:     "6233",
+			Host:     "192.168.122.1",
+			Hostname: "192.168.122.1:6233",
+			Path:     "/foo",
+		},
+
+		{
+			Scenario: "ibmc url ipv6",
+			Address:  "ibmc://[fe80::fc33:62ff:fe83:8a76]",
+			Type:     "ibmc",
+			Port:     "",
+			Host:     "fe80::fc33:62ff:fe83:8a76",
+			Hostname: "[fe80::fc33:62ff:fe83:8a76]",
+			Path:     "",
+		},
+
+		{
+			Scenario: "ibmc url path ipv6",
+			Address:  "ibmc://[fe80::fc33:62ff:fe83:8a76]:6233/foo",
+			Type:     "ibmc",
+			Port:     "6233",
+			Host:     "fe80::fc33:62ff:fe83:8a76",
+			Hostname: "[fe80::fc33:62ff:fe83:8a76]:6233",
+			Path:     "/foo",
+		},
+
+		{
+			Scenario: "ibmc url no sep",
+			Address:  "ibmc:192.168.122.1",
+			Type:     "ibmc",
+			Port:     "",
+			Host:     "192.168.122.1",
+			Hostname: "192.168.122.1",
+			Path:     "",
+		},
 	} {
 		t.Run(tc.Scenario, func(t *testing.T) {
 			url, err := getParsedURL(tc.Address)
@@ -290,86 +371,86 @@ func TestParse(t *testing.T) {
 
 func TestStaticDriverInfo(t *testing.T) {
 	for _, tc := range []struct {
-		Scenario string
-		input    string
-		needsMac bool
-		driver   string
-		boot     string
+		Scenario   string
+		input      string
+		needsMac   bool
+		driver     string
+		boot       string
 		management string
-		power string
-		raid string
-		vendor string
+		power      string
+		raid       string
+		vendor     string
 	}{
 		{
-			Scenario: "ipmi",
-			input:    "ipmi://192.168.122.1:6233",
-			needsMac: false,
-			driver:   "ipmi",
-			boot:     "ipxe",
+			Scenario:   "ipmi",
+			input:      "ipmi://192.168.122.1:6233",
+			needsMac:   false,
+			driver:     "ipmi",
+			boot:       "ipxe",
 			management: "",
-			power: "",
-			raid: "",
-			vendor: "",
+			power:      "",
+			raid:       "",
+			vendor:     "",
 		},
 
 		{
-			Scenario: "libvirt",
-			input:    "libvirt://192.168.122.1",
-			needsMac: true,
-			driver:   "ipmi",
-			boot:     "ipxe",
+			Scenario:   "libvirt",
+			input:      "libvirt://192.168.122.1",
+			needsMac:   true,
+			driver:     "ipmi",
+			boot:       "ipxe",
 			management: "",
-			power: "",
-			raid: "",
-			vendor: "",
+			power:      "",
+			raid:       "",
+			vendor:     "",
 		},
 
 		{
-			Scenario: "idrac",
-			input:    "idrac://192.168.122.1",
-			needsMac: false,
-			driver:   "idrac",
-			boot:     "ipxe",
+			Scenario:   "idrac",
+			input:      "idrac://192.168.122.1",
+			needsMac:   false,
+			driver:     "idrac",
+			boot:       "ipxe",
 			management: "",
-			power: "",
-			raid: "",
-			vendor: "",
+			power:      "",
+			raid:       "",
+			vendor:     "",
 		},
 
 		{
-			Scenario: "irmc",
-			input:    "irmc://192.168.122.1",
-			needsMac: false,
-			driver:   "irmc",
-			boot:     "pxe",
+			Scenario:   "irmc",
+			input:      "irmc://192.168.122.1",
+			needsMac:   false,
+			driver:     "irmc",
+			boot:       "pxe",
 			management: "",
-			power: "",
-			raid: "irmc",
-			vendor: "",
+			power:      "",
+			raid:       "irmc",
+			vendor:     "",
 		},
 
 		{
-			Scenario: "redfish",
-			input:    "redfish://192.168.122.1",
-			needsMac: true,
-			driver:   "redfish",
-			boot:     "ipxe",
+			Scenario:   "redfish",
+			input:      "redfish://192.168.122.1",
+			needsMac:   true,
+			driver:     "redfish",
+			boot:       "ipxe",
 			management: "",
-			power: "",
-			raid: "",
-			vendor: "",
+			power:      "",
+			raid:       "",
+			vendor:     "",
 		},
 
 		{
-			Scenario: "redfish virtual media",
-			input:    "redfish-virtualmedia://192.168.122.1",
-			needsMac: true,
-			driver:   "redfish",
-			boot:     "redfish-virtual-media",
+			Scenario:   "redfish virtual media",
+			input:      "redfish-virtualmedia://192.168.122.1",
+			needsMac:   true,
+			driver:     "redfish",
+			boot:       "redfish-virtual-media",
 			management: "",
-			power: "",
-			raid: "",
-			vendor: "",
+			power:      "",
+			raid:       "",
+			vendor:     "",
 		},
 
 		{
@@ -381,15 +462,27 @@ func TestStaticDriverInfo(t *testing.T) {
 		},
 
 		{
-			Scenario: "idrac virtual media",
-			input:    "idrac-virtualmedia://192.168.122.1",
-			needsMac: true,
-			driver:   "idrac",
-			boot:     "idrac-redfish-virtual-media",
+			Scenario:   "idrac virtual media",
+			input:      "idrac-virtualmedia://192.168.122.1",
+			needsMac:   true,
+			driver:     "idrac",
+			boot:       "idrac-redfish-virtual-media",
 			management: "idrac-redfish",
-			power: "idrac-redfish",
-			raid: "no-raid",
-			vendor: "no-vendor",
+			power:      "idrac-redfish",
+			raid:       "no-raid",
+			vendor:     "no-vendor",
+		},
+
+		{
+			Scenario:   "ibmc",
+			input:      "ibmc://192.168.122.1:6233",
+			needsMac:   true,
+			driver:     "ibmc",
+			boot:       "pxe",
+			management: "ibmc",
+			power:      "ibmc",
+			raid:       "no-raid",
+			vendor:     "",
 		},
 	} {
 		t.Run(tc.Scenario, func(t *testing.T) {
@@ -653,6 +746,73 @@ func TestDriverInfo(t *testing.T) {
 				"redfish_password":  "",
 				"redfish_username":  "",
 				"redfish_verify_ca": false,
+			},
+		},
+
+		// ibmc driver testcases
+		{
+			Scenario: "ibmc",
+			input:    "ibmc://192.168.122.1/foo/bar",
+			expects: map[string]interface{}{
+				"ibmc_address":   "https://192.168.122.1/foo/bar",
+				"ibmc_password":  "",
+				"ibmc_username":  "",
+				"ibmc_verify_ca": false,
+			},
+		},
+
+		{
+			Scenario: "ibmc http",
+			input:    "ibmc+http://192.168.122.1/foo/bar",
+			expects: map[string]interface{}{
+				"ibmc_address":   "http://192.168.122.1/foo/bar",
+				"ibmc_password":  "",
+				"ibmc_username":  "",
+				"ibmc_verify_ca": false,
+			},
+		},
+
+		{
+			Scenario: "ibmc https",
+			input:    "ibmc+https://192.168.122.1/foo/bar",
+			expects: map[string]interface{}{
+				"ibmc_address":   "https://192.168.122.1/foo/bar",
+				"ibmc_password":  "",
+				"ibmc_username":  "",
+				"ibmc_verify_ca": false,
+			},
+		},
+
+		{
+			Scenario: "ibmc port",
+			input:    "ibmc://192.168.122.1:8080/foo/bar",
+			expects: map[string]interface{}{
+				"ibmc_address":   "https://192.168.122.1:8080/foo/bar",
+				"ibmc_password":  "",
+				"ibmc_username":  "",
+				"ibmc_verify_ca": false,
+			},
+		},
+
+		{
+			Scenario: "ibmc ipv6",
+			input:    "ibmc://[fe80::fc33:62ff:fe83:8a76]/foo/bar",
+			expects: map[string]interface{}{
+				"ibmc_address":   "https://[fe80::fc33:62ff:fe83:8a76]/foo/bar",
+				"ibmc_password":  "",
+				"ibmc_username":  "",
+				"ibmc_verify_ca": false,
+			},
+		},
+
+		{
+			Scenario: "ibmc ipv6 port",
+			input:    "ibmc://[fe80::fc33:62ff:fe83:8a76]:8080/foo",
+			expects: map[string]interface{}{
+				"ibmc_address":   "https://[fe80::fc33:62ff:fe83:8a76]:8080/foo",
+				"ibmc_password":  "",
+				"ibmc_username":  "",
+				"ibmc_verify_ca": false,
 			},
 		},
 	} {
